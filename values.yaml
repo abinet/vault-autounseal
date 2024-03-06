@@ -1,0 +1,99 @@
+server:  
+  ha:
+    apiAddr: http://$(HOSTNAME).vault-internal:8200
+    enabled: true
+    raft:
+      config: |
+        ui = true
+
+        listener "tcp" {
+          tls_disable = 1
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          # Enable unauthenticated metrics access (necessary for Prometheus Operator)
+          #telemetry {
+          #  unauthenticated_metrics_access = "true"
+          #}
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+          
+          retry_join {
+            leader_api_addr = "http://vault-0.vault-internal:8200"
+          }
+
+          retry_join {
+            leader_api_addr = "http://vault-1.vault-internal:8200"
+          }
+
+          retry_join {
+            leader_api_addr = "http://vault-2.vault-internal:8200"
+          }
+
+
+          
+          autopilot {
+            cleanup_dead_servers = "true"
+            last_contact_threshold = "200ms"
+            last_contact_failure_threshold = "10m"
+            max_trailing_logs = 250000
+            min_quorum = 5
+            server_stabilization_time = "10s"
+          }          
+        }
+
+        service_registration "kubernetes" {}
+      enabled: true
+      setNodeId: true
+  ingress:
+    enabled: true
+    tls:
+      - secretName: vault-tls-cert
+        hosts:
+          - example.com      
+    hosts:
+      - host: example.com
+        http:
+          paths: 
+          - backend:
+              service:
+                name: vault-active
+                port:
+                  number: 8200
+            path: /
+            pathType: Prefix
+  logLevel: debug
+
+  extraContainers:
+  - image: rancher/mirrored-curlimages-curl:7.77.0
+    imagePullPolicy: IfNotPresent
+    env:
+    - name: GITLAB_API_URL
+      value: <PROVIDE GITLAB API HERE>
+    - name: GITLAB_ENV_SCOPE
+      value: <PROVIDE GITLAB VARIABLE ENV SCOPE HERE>
+    - name: GITLAB_PROJECT_ID
+      value: <PROVIDE GITLAB PROJECT HERE>
+    - name: GITLAB_VARIABLE_NAME
+      value: <PROVIDE GITLAB VARIABLE NAME HERE>
+    name: init
+    command: ["/vault-init/init.sh"]
+    volumeMounts:
+      - name: init
+        mountPath: /vault-init
+      - name: gitlab-secret
+        mountPath: "/gitlab-secret"
+        readOnly: true            
+
+  volumes:
+  - name: init
+    configMap:
+      name: vault-init-config
+      defaultMode: 511
+  - name: gitlab-secret
+    secret:
+      secretName: gitlab-secret          
+
+ui:
+  enabled: true
